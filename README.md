@@ -1,9 +1,9 @@
 # eLDAPperDan or ldapper.pl
-#
-# ldapper is an Active Directory and LDAP interrogation tool
-# I wrote this to aid in getting useful information formatted cleanly
-# during penetration tests
-#
+
+ ldapper is an Active Directory and LDAP interrogation tool
+ I wrote this to aid in getting useful information formatted cleanly
+ during penetration tests
+
 # Necessary libraries:
 apt-get install libnet-ldap-perl
 
