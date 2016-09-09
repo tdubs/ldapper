@@ -8,6 +8,7 @@
 apt-get install libnet-ldap-perl
 
 # Example Usage:
+```
 user@linux:/# ./ldap.pl
  -= el Dapper Dan Usage =-
 -s Server (Target LDAP Server)
@@ -36,3 +37,4 @@ USER: Guest, Guest, DESC: Built-in account for guest access to the computer/doma
 USER: krbtgt, krbtgt, DESC: Key Distribution Center Service Account, HOME: , PWDRESET: 2016-09-09, LASTLOGON: Never
 
 user@linux:/# 
+```
