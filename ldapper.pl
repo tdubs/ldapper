@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-$version = "0.6";
+$version = "0.7";
 #
 # added list all computers
 #
@@ -10,7 +10,7 @@ $version = "0.6";
 #
 # -u argument is either user@domain.com
 # or 'domain\user' 
-# not the backslash is not escaped in 
+# note the backslash is not escaped in 
 # single quotes
 #
 # To Do
@@ -121,9 +121,12 @@ else
  print "\n";
 }
 
-@domVals = split( '\.', $argDomain);
- $numElements=@domVals;
- $i = 1;
+ if ( $argDomain )
+ {
+
+  @domVals = split( '\.', $argDomain);
+  $numElements=@domVals;
+  $i = 1;
 
   foreach my $val (@domVals) {
     $baseDN .= "dc=".$val;
@@ -133,6 +136,11 @@ else
     }
     $i++;
    }
+  }
+
+  else {
+    $obtainBaseDN = "YES";
+  }
 
 printf("[+] Connecting to Server: $server\n");
 printf("[+] User: $username\n");
@@ -161,6 +169,44 @@ $mesg->code( ) && die $mesg->error;
 my $page = Net::LDAP::Control::Paged->new(size => 999);
 my $cookie;
 while (1) {
+
+ # to try and obtain baseDN we will perform an nslookup of the target
+ # IP address and use the domain we receive, note that we are querying
+ # the target IP itself, as we are assuming it also runs DNS
+ if ( $obtainBaseDN)
+ {
+   print "[I] No BaseDN specified, Attempting to obtain\n";
+   print "[I] Querying $server DNS entry for PTR:$server\n";
+   my $res   = Net::DNS::Resolver->new(nameservers => [$server, $server]);
+   my $query=$res->search("$server", PTR);
+       if ($query) {
+         foreach $rr ($query->answer) {
+	$ptrRecord = $rr->ptrdname;
+ 	  print "[I]\t Answer is $ptrRecord\n";
+        }
+       }
+
+ @domVals = split( '\.', $ptrRecord);
+ # remove first element in array, as we assume 
+ # it is the DNS hostname
+ shift @domVals;
+
+ $numElements=@domVals;
+ $i = 1;
+
+ $baseDN = "";
+  foreach my $val (@domVals) {
+   #print "adding dc= $val\n";
+    $baseDN .= "dc=".$val;
+    if ($i < $numElements )
+    {
+        $baseDN .=",";
+    }
+    $i++;
+   }
+    print "[!] baseDN is $baseDN\n";
+ }
+
 
  # This loop will grab a ton of useful info
  # Step 1: Domain Controllers
