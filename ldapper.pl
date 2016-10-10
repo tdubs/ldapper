@@ -1,11 +1,10 @@
 #!/usr/bin/perl
 #
-$version = "0.7";
+$version = "0.8";
 #
-# added list all computers
+# fixed ability to idenitfy BaseDN via RootDSE
 #
 # apt-get install libnet-ldap-perl
-#
 #
 #
 # -u argument is either user@domain.com
@@ -48,6 +47,8 @@ $serverFilter = "(objectClass=computer)";
 $siteServerFilter = "(objectClass=server)";
 $userFilter = "(&(objectClass=user)(objectcategory=person))";
 $trustFilter = "(objectClass=trustedDomain)";
+$containerFilter = "(objectClass=Container)";
+$ouFilter = "(objectClass=OrganizationalUnit)";
 
 my %args;	
 
@@ -68,6 +69,7 @@ print "-S (list all Servers in domain)\n";
 print "-U (list all Users in domain)\n";
 print "-N (list all Subnets in domain)\n";
 print "-T (list all Trusts in domain)\n";
+print "-O (list of all Organizational Units - detailed)\n";
 exit;
 }
 
@@ -77,19 +79,6 @@ sub procWindowsTime{
    $retTime = POSIX::strftime( "%Y-%m-%d", localtime(($timeInteger/10000000)-11644473600) );
    return $retTime;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 getopt('sugpdM', \%args);
@@ -106,6 +95,7 @@ $listAllTrusts = $args{T};
 $generateReport = $args{R};
 $listAllComputers = $args{C};
 $userGroupMembers = $args{M};
+$listOrgUnits = $args{O};
 
 if ( $args{p} )
 {
@@ -144,7 +134,12 @@ else
 
 printf("[+] Connecting to Server: $server\n");
 printf("[+] User: $username\n");
-printf("[+] BaseDN: $baseDN\n");
+
+if ( $baseDN ) 
+{ 
+ printf("[+] BaseDN: $baseDN\n");
+}
+
 if ($groupname) {
   $findGroup = "YES";
   printf("[+] Looking for all users in group $groupname\n");
@@ -175,38 +170,14 @@ while (1) {
  # the target IP itself, as we are assuming it also runs DNS
  if ( $obtainBaseDN)
  {
-   print "[I] No BaseDN specified, Attempting to obtain\n";
-   print "[I] Querying $server DNS entry for PTR:$server\n";
-   my $res   = Net::DNS::Resolver->new(nameservers => [$server, $server]);
-   my $query=$res->search("$server", PTR);
-       if ($query) {
-         foreach $rr ($query->answer) {
-	$ptrRecord = $rr->ptrdname;
- 	  print "[I]\t Answer is $ptrRecord\n";
-        }
-       }
+   print "[+] BaseDN not specified, querying RootDSE\n";
 
- @domVals = split( '\.', $ptrRecord);
- # remove first element in array, as we assume 
- # it is the DNS hostname
- shift @domVals;
+   my $dse = $ldap->root_dse( attrs => ['defaultNamingContext'] );
+   my @contexts = $dse->get_value('namingContexts');
 
- $numElements=@domVals;
- $i = 1;
-
- $baseDN = "";
-  foreach my $val (@domVals) {
-   #print "adding dc= $val\n";
-    $baseDN .= "dc=".$val;
-    if ($i < $numElements )
-    {
-        $baseDN .=",";
-    }
-    $i++;
-   }
-    print "[!] baseDN is $baseDN\n";
+   $baseDN = $dse->get_value('defaultNamingContext');
+    print "[+] Obtained baseDN: $baseDN\n";
  }
-
 
  # This loop will grab a ton of useful info
  # Step 1: Domain Controllers
@@ -390,7 +361,6 @@ while (1) {
    }
  }
 
-
  # This loop will list all users within a domain
  if ( $listAllUsers)
  {
@@ -424,7 +394,23 @@ while (1) {
  }
 
 
+ # This loop will list all Organizational Units
+ if ( $listOrgUnits)
+ {
+   $mesg = $ldap->search( base    => $baseDN, filter  => $ouFilter, control => [$page] );
+   $mesg->code && die "Error on search: $@ : " . $mesg->error;
+   @entries = $mesg->entries;
 
+  foreach $entry (@entries) {
+   $name = $entry->get_value("name");
+   $cName = $entry->get_value("cn");
+   $desc = $entry->get_value("description");
+   $managedBy = $entry->get_value("managedBy");
+
+    print "OU: $name, DESC: $desc, Manager: $managedBy \n";
+
+  }
+ }
     my ($resp) = $mesg->control(LDAP_CONTROL_PAGED) or last;
     $cookie    = $resp->cookie or last;
     # Paging Control
