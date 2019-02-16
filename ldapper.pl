@@ -62,6 +62,7 @@ print "\n -= Target Information =-\n";
 print "-R (Run all Queries)\n";
 print "   (currently: Computers, Groups, Users, Trusts, Sites)\n";
 print "-C (list all computers in domain)\n";
+print "-L (list all groups in domain (simple listing))\n";
 print "-G (list all groups in domain and members of those groups)\n";
 print "-S (list all Servers in domain)\n";
 print "-U (list all Users in domain)\n";
@@ -90,6 +91,8 @@ $groupname = $args{g};
 $argDomain = $args{d};
 
 $listAllGroups = $args{G};
+$listGroupsSimple = $args{L};
+
 $listAllServers = $args{S};
 $listAllUsers = $args{U};
 $listAllSubnets = $args{N};
@@ -101,14 +104,18 @@ $userAllAtributes = $args{A};
 
 $listOrgUnits = $args{O};
 
+if ($groupname) {
+  $findGroup = "YES";
+}
+
 if ($generateReport)
 {
- $listAllGroups = "YUP";
  $listAllUsers = "YUP";
- $listAllSubnets = "YUP";
- $listAllTrusts = "YUP";
+ $listAllGroups = "YUP";
  $listAllComputers = "YUP";
+ $listAllSubnets = "YUP";
  $listOrgUnits = "YUP";
+ $listAllTrusts = "YUP";
 }
 
 if ( $args{p} )
@@ -125,9 +132,8 @@ else
  print "\n";
 }
 
- if ( $argDomain )
- {
-
+if ( $argDomain )
+{
   @domVals = split( '\.', $argDomain);
   $numElements=@domVals;
   $i = 1;
@@ -140,11 +146,11 @@ else
     }
     $i++;
    }
-  }
+}
 
-  else {
+else {
     $obtainBaseDN = "YES";
-  }
+}
 
 printf("[+] Connecting to Server: $server\n");
 printf("[+] User: $username\n");
@@ -152,11 +158,6 @@ printf("[+] User: $username\n");
 if ( $baseDN ) 
 { 
  printf("[+] BaseDN: $baseDN\n");
-}
-
-if ($groupname) {
-  $findGroup = "YES";
-  printf("[+] Looking for all users in group $groupname\n");
 }
 
 
@@ -191,12 +192,74 @@ sub obtainBaseDN
 
 
 
- # This loop will list all servers within domain
- if ( $listAllServers)
- {
-   $mesg = $ldap->search( base => $baseDN, filter  => $serverFilter, control => [$page] );
-   $mesg->code && die "Error on search: $@ : " . $mesg->error;
-   @entries = $mesg->entries;
+# This loop will list all users within a domain
+if ( $listAllUsers)
+{
+  while(1){
+  $mesg = $ldap->search( base    => $baseDN, filter  => $userFilter, control => [$page] );
+  $mesg->code && die "Error on search: $@ : " . $mesg->error;
+  @entries = $mesg->entries;
+
+  my($resp)  = $mesg->control( LDAP_CONTROL_PAGED ) or last;
+  $cookie    = $resp->cookie or last;
+  $page->cookie($cookie);
+
+  foreach $entry (@entries) {
+   $cName = $entry->get_value("cn");
+   $sName = $entry->get_value("sAMAccountName");
+   $desc = $entry->get_value("description");
+   $hDir = $entry->get_value("homeDirectory");
+   $pwdLastSet = $entry->get_value("pwdLastSet");
+   $lastLogon = $entry->get_value("lastLogon");
+
+  $pwdLastSetTime = procWindowsTime($pwdLastSet);
+  if( $lastLogon == 0 ) {
+   $lastLogonTime = "Never"; }
+  else {
+   $lastLogonTime = procWindowsTime($lastLogon); }
+
+   #Add whenCreated
+   $lastTime = procWindowsTime($lastLogon);
+
+    print "USER: $sName, $cName, DESC: $desc, HOME: $hDir, PWDRESET: $pwdLastSetTime, LASTLOGON: $lastLogonTime\n";
+  }
+ }
+}
+
+# this will list all computers in the domain
+if ( $listAllComputers)
+{
+ while(1){
+  $mesg = $ldap->search( base    => $baseDN, filter  => $serverFilter, control => [$page] );
+  $mesg->code && die "Error on search: $@ : " . $mesg->error;
+  @entries = $mesg->entries;
+
+  my($resp)  = $mesg->control( LDAP_CONTROL_PAGED ) or last;
+  $cookie    = $resp->cookie or last;
+  $page->cookie($cookie);
+
+  foreach $entry (@entries) {
+  $cName = $entry->get_value("cn");
+  $dName = $entry->get_value("dnsHostName");
+  $opSystem = $entry->get_value("operatingSystem");
+  $osPack = $entry->get_value("operatingSystemServicePack");
+  $lastLogon = $entry->get_value("lastLogonTimestamp");
+  $lastTime = procWindowsTime($lastLogon);
+  print "Computer: $cName, $dName, $opSystem $osPack, LastLogon: $lastTime\n";
+  }
+ }
+}
+
+# This loop will list all servers within domain
+if ( $listAllServers)
+{
+ while(1){
+  $mesg = $ldap->search( base => $baseDN, filter  => $serverFilter, control => [$page] );
+  $mesg->code && die "Error on search: $@ : " . $mesg->error;
+  @entries = $mesg->entries;
+
+  my($resp)  = $mesg->control( LDAP_CONTROL_PAGED ) or last;
+  $cookie    = $resp->cookie or last;
 
    foreach $entry (@entries) {
    $cName = $entry->get_value("cn");
@@ -212,24 +275,9 @@ sub obtainBaseDN
     }
    }
  }
+}
 
- # this will list all computers in the domain
- if ( $listAllComputers)
- {
-   $mesg = $ldap->search( base    => $baseDN, filter  => $serverFilter, control => [$page] );
-   $mesg->code && die "Error on search: $@ : " . $mesg->error;
-   @entries = $mesg->entries;
 
-   foreach $entry (@entries) {
-   $cName = $entry->get_value("cn");
-   $dName = $entry->get_value("dnsHostName");
-   $opSystem = $entry->get_value("operatingSystem");
-   $osPack = $entry->get_value("operatingSystemServicePack");
-   $lastLogon = $entry->get_value("lastLogonTimestamp");
-   $lastTime = procWindowsTime($lastLogon);
-     print "Computer: $cName, $dName, $opSystem $osPack, LastLogon: $lastTime\n";
-   }
- }
 
  # This loop will list all SUBNETS within domain
  if( $listAllSubnets )
@@ -244,14 +292,17 @@ sub obtainBaseDN
    $desc = $entry->get_value("description");
    $siteObject = $entry->get_value("siteObject");
    $location = $entry->get_value("location");
-	print "SUBNET: $cName, DESC: $desc, SITE: $siteObject, LOCATION: $location\n";
+	 print "SUBNET: $cName, DESC: $desc, SITE: $siteObject, LOCATION: $location\n";
    }
  }
+
 
 # This loop will list all Members of the group
 # specified by the -g command line argument
  if ( $findGroup )
  {
+   printf("[+] Looking for all users in group $groupname\n");
+
    $mesg = $ldap->search( base    => $baseDN, filter  => $groupFilter, control => [$page] );
    $mesg->code && die "Error on search: $@ : " . $mesg->error;
    @entries = $mesg->entries;
@@ -282,37 +333,7 @@ sub obtainBaseDN
 
 
 
- # This loop will list all users within a domain
- if ( $listAllUsers)
- {
-   $mesg = $ldap->search( base    => $baseDN, filter  => $userFilter, control => [$page] );
-   $mesg->code && die "Error on search: $@ : " . $mesg->error;
-   @entries = $mesg->entries;
 
-  foreach $entry (@entries) {
-   $cName = $entry->get_value("cn");
-   $sName = $entry->get_value("sAMAccountName");
-   $desc = $entry->get_value("description");
-   $hDir = $entry->get_value("homeDirectory");
-   $pwdLastSet = $entry->get_value("pwdLastSet");
-   $lastLogon = $entry->get_value("lastLogon");
-
-  $pwdLastSetTime = procWindowsTime($pwdLastSet);
-  if( $lastLogon == 0 )
-  {
-   $lastLogonTime = "Never";
-  }
-  else
-  {
-   $lastLogonTime = procWindowsTime($lastLogon);
-  }
-
-   #Add whenCreated
-   $lastTime = procWindowsTime($lastLogon);
-
-    print "USER: $cName, $sName, DESC: $desc, HOME: $hDir, PWDRESET: $pwdLastSetTime, LASTLOGON: $lastLogonTime\n";
-  }
- }
 
 
 
@@ -381,10 +402,14 @@ sub obtainBaseDN
 # This loop will list all Organizational Units
 if ( $listOrgUnits)
 {
+ while (1){
+  $mesg = $ldap->search( base => $baseDN, filter => $ouFilter, control => [$page] );
+  $mesg->code && die "Error on search: $@ : " . $mesg->error;
+  @entries = $mesg->entries;
 
-   $mesg = $ldap->search( base => $baseDN, filter => $ouFilter, control => [$page] );
-   $mesg->code && die "Error on search: $@ : " . $mesg->error;
-   @entries = $mesg->entries;
+  my($resp)  = $mesg->control( LDAP_CONTROL_PAGED ) or last;
+  $cookie    = $resp->cookie or last;
+  $page->cookie($cookie);
 
  	foreach $entry (@entries) 
  	{
@@ -392,15 +417,11 @@ if ( $listOrgUnits)
   	 $cName = $entry->get_value("cn");
   	 $desc = $entry->get_value("description");
    	 $managedBy = $entry->get_value("managedBy");
-     print "OU: $name, DESC: $desc, Manager: $managedBy \n";
+     $dn = $entry->get_value("distinguishedName");
+     print "OU: $name, DESC: $desc, Manager: $managedBy, DN: $dn \n";
  	}
- 
-    my ($resp) = $mesg->control(LDAP_CONTROL_PAGED) or last;
-    $cookie    = $resp->cookie or last;
-    # Paging Control
-    $page->cookie($cookie);
- 
- if ($cookie) {
+}
+ if (defined($cookie) && length($cookie)) {
     print "abnormal exit\n";
     # Abnormal exit, so let the server know we do not want any more
     $page->cookie($cookie);
@@ -411,26 +432,39 @@ if ( $listOrgUnits)
 
 
 
- # This loop will list all groups within domain
- #if ( $listAllGroups )
- #{
- #  $mesg = $ldap->search( base    => $baseDN, filter  => $groupFilter, control => [$page] );
-#   $mesg->code && die "Error on search: $@ : " . $mesg->error;
-#   @entries = $mesg->entries;
-#   foreach $entry (@entries) {
-#    $gname = $entry->get_value("cn");
-#    $desc = $entry->get_value("description");
-#    print "Group: $gname: $desc\n";
-#   }
-# }
+# This loop will list all groups within domain
+if ( $listGroupsSimple )
+{
+ while(1){
+  $mesg = $ldap->search( base    => $baseDN, filter  => $groupFilter, control => [$page] );
+  $mesg->code && die "Error on search: $@ : " . $mesg->error;
+  @entries = $mesg->entries;
+
+  my($resp)  = $mesg->control( LDAP_CONTROL_PAGED ) or last;
+  $cookie    = $resp->cookie or last;
+  $page->cookie($cookie);
+
+  foreach $entry (@entries) {
+    $gname = $entry->get_value("cn");
+    $desc = $entry->get_value("description");
+    print "Group: $gname: $desc\n";
+  }
+ }
+}
 
 
  # This loop will list all groups within domain AND print out all members
 if ( $listAllGroups )
 {
+ while(1)
+ {
    $mesg = $ldap->search( base    => $baseDN, filter  => $groupFilter, control => [$page] );
    $mesg->code && die "Error on search: $@ : " . $mesg->error;
    @entries = $mesg->entries;
+
+   my($resp)  = $mesg->control( LDAP_CONTROL_PAGED ) or last;
+  $cookie    = $resp->cookie or last;
+  $page->cookie($cookie);
 
    foreach $entry (@entries) 
    {
@@ -452,6 +486,7 @@ if ( $listAllGroups )
       }
      print "\n";
    }
+  }
 }
 
  # This loop will list all groups that user is a member of
@@ -476,7 +511,7 @@ if ( $listAllGroups )
 
 
 
- # This loop will list all groups that user is a member of
+ # This loop will list all attributes for the user
  if ( $userAllAtributes )
  {
    print "[I] Grabbing All Attributes for $userAllAtributes\n";
@@ -494,12 +529,40 @@ if ( $listAllGroups )
    	 my $attr;
      foreach $attr ( sort $entr->attributes ) {
      # skip binary we can't handle
-    # next if ( $attr =~ /;binary$/ );
-     #next if -B $attr;
      $theEntry = $entr->get_value ( $attr );
      $theEntry =~ s/[^[:print:]]+//g;
      $attr =~ s/[^[:print:]]+//g;
         print "  $attr : ", $theEntry ,"\n";
    	 }
     }
+ }
+
+
+# $testAttributes = "Yup";
+# using this loop for testing of new queries
+# it will list all attributes for the specified thing
+ if ( $testAttributes )
+ {
+   print "[I] Grabbing All Attributes for $testAttribute\n";
+   #$userMemberFilter = "(sAMAccountName=$userAllAtributes)";
+   $mesg = $ldap->search( base => $baseDN, filter => $ouFilter, control => [$page] );
+   #$mesg = $ldap->search( base    => $baseDN, filter  => $userMemberFilter, control => [$page] );
+
+   $mesg->code && die "Error on search: $@ : " . $mesg->error;
+   @entries = $mesg->entries;
+
+  my $entr;
+  foreach $entr ( @entries ) {
+      print "DN: ", $entr->dn, "\n";
+
+     my $attr;
+     foreach $attr ( sort $entr->attributes ) {
+     # skip binary we can't handle
+     $theEntry = $entr->get_value ( $attr );
+     $theEntry =~ s/[^[:print:]]+//g;
+     $attr =~ s/[^[:print:]]+//g;
+        print "  $attr : ", $theEntry ,"\n";
+     }
+    print"#####################################################################\n\n\n";
+   }
  }
