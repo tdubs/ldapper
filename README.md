@@ -9,7 +9,6 @@ apt-get install libnet-ldap-perl
 
 # Example Usage:
 ```
-user@linux:/# ./ldapper.pl
  -= el Dapper Dan Usage =-
 -s Server (Target LDAP Server)
 -u User (user must be user@domain or old style DOMAIN\User)
@@ -19,15 +18,18 @@ user@linux:/# ./ldapper.pl
 -R (Run all Queries)
    (currently: Computers, Groups, Users, Trusts, Sites)
 -C (list all computers in domain)
+-L (list all groups in domain (simple listing))
 -G (list all groups in domain and members of those groups)
 -S (list all Servers in domain)
 -U (list all Users in domain)
 -N (list all Subnets in domain)
 -T (list all Trusts in domain)
 -O (list of all Organizational Units - detailed)
+-K (list all Service Principal Names - for Kerberoasting)
 -g <group> (list all members of target group, case sensitive)
 -M <user> (list all groups <user> is a member of)
 -A <user> (list all attributes for <user> *NOTE* that this strips binary data)
+
 
 user@linux:/# ./ldap.pl -s 10.0.0.10 -u evilco\\administrator -U -d evilco.loc
 Enter your password: 
