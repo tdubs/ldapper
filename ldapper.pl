@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-$version = "0.8";
+$version = "0.9";
 #
 # fixed ability to idenitfy BaseDN via RootDSE
 #
@@ -49,6 +49,7 @@ $userFilter = "(&(objectClass=user)(objectcategory=person))";
 $trustFilter = "(objectClass=trustedDomain)";
 $containerFilter = "(objectClass=Container)";
 $ouFilter = "(objectClass=OrganizationalUnit)";
+$spnFilter = "(&(objectclass=user)(objectcategory=user)(servicePrincipalName=*))";
 
 my %args;	
 
@@ -69,6 +70,7 @@ print "-U (list all Users in domain)\n";
 print "-N (list all Subnets in domain)\n";
 print "-T (list all Trusts in domain)\n";
 print "-O (list of all Organizational Units - detailed)\n";
+print "-K (list all Service Principal Names - for Kerberoasting)\n";
 print "-g <group> (list all members of target group, case sensitive)\n";
 print "-M <user> (list all groups <user> is a member of)\n";
 print "-A <user> (list all attributes for <user> *NOTE* that this strips binary data)\n";
@@ -101,6 +103,7 @@ $generateReport = $args{R};
 $listAllComputers = $args{C};
 $userGroupMembers = $args{M};
 $userAllAtributes = $args{A};
+$listAllSPNs = $args{K};
 
 $listOrgUnits = $args{O};
 
@@ -566,3 +569,20 @@ if ( $listAllGroups )
     print"#####################################################################\n\n\n";
    }
  }
+
+
+ # This loop will list all Service Principal Names in the domain
+if ( $listAllSPNs )
+{
+   $mesg = $ldap->search( base    => $baseDN, filter  => $spnFilter, control => [$page] );
+   $mesg->code && die "Error on search: $@ : " . $mesg->error;
+   @entries = $mesg->entries;
+
+   foreach $entry (@entries) 
+   {
+      $cn = $entry->get_value("cn");
+      $description = $entry->get_value("description");
+      $spn = $entry->get_value("servicePrincipalName");
+      print "SPN: $spn, $cn, $description\n";
+   }
+}
