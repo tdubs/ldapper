@@ -583,6 +583,10 @@ if ( $listAllSPNs )
       $cn = $entry->get_value("cn");
       $description = $entry->get_value("description");
       $spn = $entry->get_value("servicePrincipalName");
-      print "SPN: $spn, $cn, $description\n";
+      
+      $pwdLastSet = $entry->get_value("pwdLastSet");
+      $pwdLastSetTime = procWindowsTime($pwdLastSet);
+      
+      print "SPN: $spn, $cn, $description, $pwdLastSetTime\n";
    }
 }
