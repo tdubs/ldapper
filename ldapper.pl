@@ -1,8 +1,7 @@
 #!/usr/bin/perl
 #
-$version = "0.9";
+$version = "0.91";
 #
-# fixed ability to idenitfy BaseDN via RootDSE
 #
 # apt-get install libnet-ldap-perl
 #
@@ -50,6 +49,7 @@ $trustFilter = "(objectClass=trustedDomain)";
 $containerFilter = "(objectClass=Container)";
 $ouFilter = "(objectClass=OrganizationalUnit)";
 $spnFilter = "(&(objectclass=user)(objectcategory=user)(servicePrincipalName=*))";
+$exchangeFilter = "(objectCategory=msExchExchangeServer)";
 
 my %args;	
 
@@ -63,14 +63,15 @@ print "\n -= Target Information =-\n";
 print "-R (Run all Queries)\n";
 print "   (currently: Computers, Groups, Users, Trusts, Sites)\n";
 print "-C (list all computers in domain)\n";
-print "-L (list all groups in domain (simple listing))\n";
+print "-E (list all Exchange Servers)\n";
 print "-G (list all groups in domain and members of those groups)\n";
-print "-S (list all Servers in domain)\n";
-print "-U (list all Users in domain)\n";
-print "-N (list all Subnets in domain)\n";
-print "-T (list all Trusts in domain)\n";
-print "-O (list of all Organizational Units - detailed)\n";
 print "-K (list all Service Principal Names - for Kerberoasting)\n";
+print "-L (list all groups in domain (simple listing))\n";
+print "-N (list all Subnets in domain)\n";
+print "-O (list of all Organizational Units - detailed)\n";
+print "-S (list all Servers in domain)\n";
+print "-T (list all Trusts in domain)\n";
+print "-U (list all Users in domain)\n";
 print "-g <group> (list all members of target group, case sensitive)\n";
 print "-M <user> (list all groups <user> is a member of)\n";
 print "-A <user> (list all attributes for <user> *NOTE* that this strips binary data)\n";
@@ -92,6 +93,7 @@ $username = $args{u};
 $groupname = $args{g};
 $argDomain = $args{d};
 
+$exchangeServers = $args{E};
 $listAllGroups = $args{G};
 $listGroupsSimple = $args{L};
 
@@ -540,7 +542,43 @@ if ( $listAllGroups )
     }
  }
 
+# List All Exchange Servers
+if ( $exchangeServers )
+{
+   print "[I] Enumerating Exchange Servers\n";
+   $configDN = "CN=Configuration," . $baseDN;
 
+   $mesg = $ldap->search( base => $configDN, filter => $exchangeFilter, control => [$page] );
+
+   $mesg->code && die "Error on search: $@ : " . $mesg->error;
+   @entries = $mesg->entries;
+
+  my $entr;
+  foreach $entr ( @entries ) {
+      print "DN: ", $entr->dn, "\n";
+  }
+   
+}
+
+ # This loop will list all Service Principal Names in the domain
+if ( $listAllSPNs )
+{
+   $mesg = $ldap->search( base    => $baseDN, filter  => $spnFilter, control => [$page] );
+   $mesg->code && die "Error on search: $@ : " . $mesg->error;
+   @entries = $mesg->entries;
+
+   foreach $entry (@entries) 
+   {
+      $cn = $entry->get_value("cn");
+      $description = $entry->get_value("description");
+      $spn = $entry->get_value("servicePrincipalName");
+      
+      $pwdLastSet = $entry->get_value("pwdLastSet");
+      $pwdLastSetTime = procWindowsTime($pwdLastSet);
+      
+      print "SPN: $spn, $cn, $description, $pwdLastSetTime\n";
+   }
+}
 # $testAttributes = "Yup";
 # using this loop for testing of new queries
 # it will list all attributes for the specified thing
@@ -571,22 +609,4 @@ if ( $listAllGroups )
  }
 
 
- # This loop will list all Service Principal Names in the domain
-if ( $listAllSPNs )
-{
-   $mesg = $ldap->search( base    => $baseDN, filter  => $spnFilter, control => [$page] );
-   $mesg->code && die "Error on search: $@ : " . $mesg->error;
-   @entries = $mesg->entries;
 
-   foreach $entry (@entries) 
-   {
-      $cn = $entry->get_value("cn");
-      $description = $entry->get_value("description");
-      $spn = $entry->get_value("servicePrincipalName");
-      
-      $pwdLastSet = $entry->get_value("pwdLastSet");
-      $pwdLastSetTime = procWindowsTime($pwdLastSet);
-      
-      print "SPN: $spn, $cn, $description, $pwdLastSetTime\n";
-   }
-}
