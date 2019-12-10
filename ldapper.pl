@@ -1,21 +1,21 @@
 #!/usr/bin/perl
 #
-$version = "0.91";
-#
+$version = "0.92";
 #
 # apt-get install libnet-ldap-perl
+# apt-get install libnet-ldap-sid-perl
+#
 #
 #
 # -u argument is either user@domain.com
 # or 'domain\user' 
-# note the backslash is not escaped in 
-# single quotes
+# note the backslash is not escaped in single quotes
 #
 # To Do
-# Add ability to search password policy
 # create 'report' format which runs all commands
 # and outputs in more human readable format
 #
+# Enumerate Nested Groups
 # Add recursive grab of group info eg; user is 
 # member of GroupX, grab GroupX description
 # 
@@ -25,7 +25,6 @@ $version = "0.91";
 # objectClass = trustedDomain
 # trustType = 2, trustDirection = 1
 #
-
 # Define the Base DN format is DC=pwn,DC=me
 # $baseDN = "dc=site,dc=mycompany,dc=com";
 
@@ -37,6 +36,7 @@ use Net::DNS;
 
 use Net::LDAP;
 use Net::LDAP::Control::Paged;
+use Net::LDAP::SID;
 use Net::LDAP::Constant qw( LDAP_CONTROL_PAGED );
 
 $groupFilter = "(objectClass=group)";
@@ -50,6 +50,12 @@ $containerFilter = "(objectClass=Container)";
 $ouFilter = "(objectClass=OrganizationalUnit)";
 $spnFilter = "(&(objectclass=user)(objectcategory=user)(servicePrincipalName=*))";
 $exchangeFilter = "(objectCategory=msExchExchangeServer)";
+$lapsFilter = "(objectClass=attributeSchema)";
+$lapsPwdFilter = "(ms-mcs-AdmPwd=*)";
+$lapsExpFilter = "(ms-mcs-AdmPwdExpirationTime=*)";
+
+$objectSIDFilter = "(objectSid=*)";
+
 
 my %args;	
 
@@ -65,6 +71,7 @@ print "   (currently: Computers, Groups, Users, Trusts, Sites)\n";
 print "-C (list all computers in domain)\n";
 print "-E (list all Exchange Servers)\n";
 print "-G (list all groups in domain and members of those groups)\n";
+print "-I (get Domain Info, e.g. Domain SID, LAPS Config, etc.)\n";
 print "-K (list all Service Principal Names - for Kerberoasting)\n";
 print "-L (list all groups in domain (simple listing))\n";
 print "-N (list all Subnets in domain)\n";
@@ -75,6 +82,9 @@ print "-U (list all Users in domain)\n";
 print "-g <group> (list all members of target group, case sensitive)\n";
 print "-M <user> (list all groups <user> is a member of)\n";
 print "-A <user> (list all attributes for <user> *NOTE* that this strips binary data)\n";
+print "-W (list all LAPS passwords, you may want to run this with various user accounts)\n";
+print "-X <baseDN Prefix> (Use New Prefix to BaseDN, use with -Z option)\n";
+print "-Z <Filter> (Query LDAP with <Filter>)\n";
 exit;
 }
 
@@ -86,7 +96,7 @@ sub procWindowsTime{
 }
 
 
-getopt('sugpdMA', \%args);
+getopt('sugpdMAZ', \%args);
 
 $server = $args{s};
 $username = $args{u};
@@ -106,6 +116,12 @@ $listAllComputers = $args{C};
 $userGroupMembers = $args{M};
 $userAllAtributes = $args{A};
 $listAllSPNs = $args{K};
+$getDomainInfo = $args{I};
+
+$listLapsPwds = $args{W};
+$prefixBaseDN = $args{X};
+$manualFilter = $args{Z};
+
 
 $listOrgUnits = $args{O};
 
@@ -151,6 +167,13 @@ if ( $argDomain )
     }
     $i++;
    }
+
+  $ldap = Net::LDAP->new ( "$server" ) or die "$@";
+  $mesg = $ldap->bind ( "$username", password => $passwd, version => 3 );          
+  $mesg->code( ) && die $mesg->error;
+
+  my $page = Net::LDAP::Control::Paged->new(size => 999);
+  my $cookie;
 }
 
 else {
@@ -184,15 +207,12 @@ sub obtainBaseDN
  my $page = Net::LDAP::Control::Paged->new(size => 999);
  my $cookie;
 
- # to try and obtain baseDN we will perform an nslookup of the target
- # IP address and use the domain we receive, note that we are querying
- # the target IP itself, as we are assuming it also runs DNS
  print "[+] BaseDN not specified, querying RootDSE\n";
  my $dse = $ldap->root_dse( attrs => ['defaultNamingContext'] );
  my @contexts = $dse->get_value('namingContexts');
  
  $baseDN = $dse->get_value('defaultNamingContext');
-  print "[+] Obtained baseDN: $baseDN\n";
+ print "[+] Obtained baseDN: $baseDN\n";
 }
 
 
@@ -216,6 +236,15 @@ if ( $listAllUsers)
    $hDir = $entry->get_value("homeDirectory");
    $pwdLastSet = $entry->get_value("pwdLastSet");
    $lastLogon = $entry->get_value("lastLogon");
+   $uac = $entry->get_value("userAccountControl");
+
+   if ( $uac eq 2){$uac = "(2) Account Disabled"}
+   if ( $uac eq 16){$uac = "(16) Account Locked"}
+   if ( $uac eq 32){$uac = "(32) Password Not Required"}
+   if ( $uac eq 64){$uac = "(64) Password Cannot be Changed"}
+   if ( $uac eq 512){$uac = "(2) Account Normal"}
+   if ( $uac eq 514){$uac = "(514) Account Disabled"}
+   if ( $uac eq 8388608){$uac = "(8388608) Password Expired"}
 
   $pwdLastSetTime = procWindowsTime($pwdLastSet);
   if( $lastLogon == 0 ) {
@@ -226,7 +255,7 @@ if ( $listAllUsers)
    #Add whenCreated
    $lastTime = procWindowsTime($lastLogon);
 
-    print "USER: $sName, $cName, DESC: $desc, HOME: $hDir, PWDRESET: $pwdLastSetTime, LASTLOGON: $lastLogonTime\n";
+    print "USER: $sName, $cName, $uac, DESC: $desc, HOME: $hDir, PWDRESET: $pwdLastSetTime, LASTLOGON: $lastLogonTime\n";
   }
  }
 }
@@ -307,6 +336,11 @@ if ( $listAllServers)
  if ( $findGroup )
  {
    printf("[+] Looking for all users in group $groupname\n");
+   #$userFilter = "(&(objectClass=user)(objectcategory=person))";
+
+   $groupFilter = "(sAMAccountName=$groupname)";
+   #printf("[D] Filter: $groupFilter\n");
+
 
    $mesg = $ldap->search( base    => $baseDN, filter  => $groupFilter, control => [$page] );
    $mesg->code && die "Error on search: $@ : " . $mesg->error;
@@ -329,7 +363,18 @@ if ( $listAllServers)
      		@nentries = $newmesg->entries;
      		foreach $nentry (@nentries) {
        			$sam = $nentry->get_value("sAMAccountName");
-       			print "$groupname: $sam\n";
+       			print "$groupname: User: $sam\n";
+     		}
+    	}
+    	foreach $member (@members)
+    	{
+     		#print "Running with filter $member\n";
+     		$userfilter = "(objectClass=group)";
+     		$newmesg = $ldap->search( base => $member, filter=> $userfilter);
+     		@nentries = $newmesg->entries;
+     		foreach $nentry (@nentries) {
+       			$sam = $nentry->get_value("sAMAccountName");
+       			print "$groupname: Group: $sam\n";
      		}
     	}
     }
@@ -560,6 +605,91 @@ if ( $exchangeServers )
    
 }
 
+# Grab Domain Info
+if ( $getDomainInfo)
+{
+   print "[I] Enumerating Domain Information\n";
+
+
+   $domainFilter = "(distinguishedName=$baseDN)";
+
+   $mesg = $ldap->search( base => $baseDN, filter => $domainFilter, control => [$page] );
+   $mesg->code && die "Error on search: $@ : " . $mesg->error;
+   @entries = $mesg->entries;
+
+	my $entr;
+ 	foreach $entr ( @entries ) {
+   		print "DN: ", $entr->dn, "\n";
+
+   	 my $attr;
+   	 $theSid = $entr->get_value("objectSid");
+   	 $sid = Net::LDAP::SID->new( $theSid );
+
+   	 $lockoutDuration = $entr->get_value("lockoutDuration");
+   	 $lockoutThresh = $entr->get_value("lockoutThreshold");
+   	 $MinPwdLength = $entr->get_value("MinPwdLength");
+   	 $maxPwdAge = $entr->get_value ("maxPwdAge");
+   	 $forestVer = $entr->get_value("msDS-Behavior-Version");
+   	 $passHistoryCount = $entr->get_value("pwdHistoryLength");
+   	 $domainNative= $entr->get_value("nTMixedDomain");
+   	 $domainCreated = $entr->get_value("whenCreated");
+   	 $nextRid = $entr->get_value ("nextRid");
+
+   	 # maPwdAge is represented in negative nanoseconds
+   	 # that's why we have to multiply by -1
+   	 $maxPwdAge = (($maxPwdAge / 10000000) / 86400) * -1;
+   	 $lockoutDuration = (($lockoutDuration / 10000000) / 3600) * -1;
+
+
+   	 if ($domainNative eq 1){ $domainNative = "(1) Mixed Mode"}
+   	 if ($domainNative eq 0){ $domainNative = "(0) Native Mode"}
+
+   	 if ($forestVer eq 0){ $forestVer = "(0) DS_BEHAVIOR_WIN2000"}
+   	 if ($forestVer eq 1){ $forestVer = "(1) DS_BEHAVIOR_WIN2003_WITH_MIXED_DOMAINS"}
+   	 if ($forestVer eq 2){ $forestVer = "(2) DS_BEHAVIOR_WIN2003"}
+   	 if ($forestVer eq 3){ $forestVer = "(3) DS_BEHAVIOR_WIN2008 - Windows Server 2008 and later"}
+
+   	 if ($forestVer eq 4){ $forestVer = "(4) DS_BEHAVIOR_WIN2008R2 - Windows Server 2008 R2 operating system and later"}
+   	 if ($forestVer eq 5){ $forestVer = "(5) DS_BEHAVIOR_WIN2012 - Windows Server 2012 operating system and later"}
+   	 if ($forestVer eq 6){ $forestVer = "(6) DS_BEHAVIOR_WIN2012R2 - Windows Server 2012 R2 operating system and later"}
+   	 if ($forestVer eq 7){ $forestVer = "(7) DS_BEHAVIOR_WIN2016 - Windows Server 2016 and later"}
+
+   	 # add pwdProperties to check for complexity requirement
+
+ 	 print "DomainSID:\t\t" . $sid->as_string . "\n";
+ 	 print "Pwd History Cnt:\t" . $passHistoryCount . "\n";
+ 	 print "Max Pwd Age:\t\t" . $maxPwdAge . " days\n";
+ 	 print "MinPwdLength:\t\t" . $MinPwdLength . "\n";
+ 	 print "lockoutThreshold:\t" . $lockoutThresh . "\n";
+ 	 print "lockoutDuration:\t" . $lockoutDuration . " hours\n";
+ 	 print "DomainVer:\t\t" . $domainNative . "\n";
+ 	 print "Forest Func Level:\t" . $forestVer . "\n";
+ 	 print "Domain Created:\t\t" . $domainCreated . "\n";
+ 	 print "NextRid:\t\t" . $nextRid . "\n";
+
+
+     #foreach $attr ( sort $entr->attributes ) {
+     # skip binary we can't handle
+     #$theEntry = $entr->get_value ( $attr );
+     #$theEntry =~ s/[^[:print:]]+//g;
+     #$attr =~ s/[^[:print:]]+//g;
+     #   print "  $attr : ", $theEntry ,"\n";
+   	 #}
+    }
+
+   $lapsFilter = "(cn=ms-Mcs-AdmPwd)";
+   $schemaDN = "CN=Schema,CN=Configuration," . $baseDN;
+
+   $mesg = $ldap->search( base => $schemaDN, filter => $lapsFilter, control => [$page] );
+   $mesg->code && die "Error on search: $@ : " . $mesg->error;
+   @entries = $mesg->entries;
+
+   	my $entr;
+ 	foreach $entr ( @entries ) {
+   		print "LAPS:\t\t\tLAPS Appears to be enabled\n";
+   	}
+}
+
  # This loop will list all Service Principal Names in the domain
 if ( $listAllSPNs )
 {
@@ -579,6 +709,62 @@ if ( $listAllSPNs )
       print "SPN: $spn, $cn, $description, $pwdLastSetTime\n";
    }
 }
+
+ # This loop will list all Service Principal Names in the domain
+if ( $listLapsPwds)
+{
+   print "[I] Querying for LAPS Passwords (note you need special privileges to actually enumerate)\n";
+
+   # From ADSecurity.org
+   # any authenticated user can view the value of the ms-mcs-AdmPwdExpirationTime attribute
+   # Thus you can tell a few things as any user
+   # If a computer is managed by LAPS (no value vs value present)
+   # When the computer’s local Administrator password was last changed (read value in LAPS GPO and subtract this value from the date/time value in the attribute).
+   # If a computer’s local Administrator password is no longer managed by LAPS (value is equal to a date/time in the past).
+
+
+  $mesg = $ldap->search( base    => $baseDN, filter  => $lapsPwdFilter, control => [$page] );
+
+   $mesg->code && die "Error on search: $@ : " . $mesg->error;
+   @entries = $mesg->entries;
+
+   foreach $entry (@entries) 
+   {
+      $cn = $entry->get_value("cn");
+      $description = $entry->get_value("description");
+      $password = $entry->get_value("ms-mcs-AdmPwd");
+      $expTime = $entry->get_value("ms-mcs-AdmPwdExpirationTime");
+      $expTimeVal = procWindowsTime($expTime);
+      
+      $pwdLastSet = $entry->get_value("pwdLastSet");
+      $pwdLastSetTime = procWindowsTime($pwdLastSet);
+      
+      print "LAPS: $cn, $password, $description, $expTime\n";
+   }
+}
+
+
+ if ( $manualFilter )
+ {
+   print "[I] Running Manual query for: $manualFilter\n";
+   #$userMemberFilter = "(sAMAccountName=$userAllAtributes)";
+   if ($prefixBaseDN){
+   	$baseDN = $prefixBaseDN . "," . $baseDN;
+   }
+   $mesg = $ldap->search( base => $baseDN, filter => $manualFilter, control => [$page] );
+   #$mesg = $ldap->search( base    => $baseDN, filter  => $userMemberFilter, control => [$page] );
+
+   $mesg->code && die "Error on search: $@ : " . $mesg->error;
+   @entries = $mesg->entries;
+
+  my $entr;
+  foreach $entr ( @entries ) {
+      print "DN: ", $entr->dn, "\n";
+   }
+ }
+
+
+
 # $testAttributes = "Yup";
 # using this loop for testing of new queries
 # it will list all attributes for the specified thing
