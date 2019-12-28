@@ -11,6 +11,10 @@ $version = "0.92";
 # or 'domain\user' 
 # note the backslash is not escaped in single quotes
 #
+#
+# Example manual query that worked:
+# -X 'DC=DomainDNSZones' -Z 'CN=Zone'
+#
 # To Do
 # create 'report' format which runs all commands
 # and outputs in more human readable format
@@ -28,9 +32,11 @@ $version = "0.92";
 # Define the Base DN format is DC=pwn,DC=me
 # $baseDN = "dc=site,dc=mycompany,dc=com";
 
+
 use Term::ReadKey;
 use Getopt::Std;
 use POSIX();
+use Socket;
 
 use Net::DNS;
 
@@ -83,7 +89,8 @@ print "-g <group> (list all members of target group, case sensitive)\n";
 print "-M <user> (list all groups <user> is a member of)\n";
 print "-A <user> (list all attributes for <user> *NOTE* that this strips binary data)\n";
 print "-W (list all LAPS passwords, you may want to run this with various user accounts)\n";
-print "-X <baseDN Prefix> (Use New Prefix to BaseDN, use with -Z option)\n";
+print "-X (Enumerate DNS Zones and DNS Records)\n";
+print "-Y <baseDN Prefix> (Use New Prefix to BaseDN, use with -Z option)\n";
 print "-Z <Filter> (Query LDAP with <Filter>)\n";
 exit;
 }
@@ -95,8 +102,23 @@ sub procWindowsTime{
    return $retTime;
 }
 
+sub printGenTime 
+{ 
+	# GeneralizedTime Format YYYYmmddHH[MM[SS]
 
-getopt('sugpdMAZ', \%args);
+    my $time = $_[0]; 
+
+    my($year, $month, $day, $hour, $minute) = 
+    $time =~ /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})/;
+
+    $printTime = "$month/$day/$year $hour:$minute";
+    #print "printTime: $printTime\n";
+     
+    return ($printTime); 
+} 
+
+
+getopt('sugpdMAYZ', \%args);
 
 $server = $args{s};
 $username = $args{u};
@@ -119,7 +141,8 @@ $listAllSPNs = $args{K};
 $getDomainInfo = $args{I};
 
 $listLapsPwds = $args{W};
-$prefixBaseDN = $args{X};
+$listDNSRecords = $args{X};
+$prefixBaseDN = $args{Y};
 $manualFilter = $args{Z};
 
 
@@ -744,15 +767,22 @@ if ( $listLapsPwds)
 }
 
 
- if ( $manualFilter )
+ if ( $manualFilter)
  {
+  while (1)
+  {
    print "[I] Running Manual query for: $manualFilter\n";
    #$userMemberFilter = "(sAMAccountName=$userAllAtributes)";
    if ($prefixBaseDN){
    	$baseDN = $prefixBaseDN . "," . $baseDN;
    }
+   print "[I] Using new BaseDN: $baseDN\n";
+
    $mesg = $ldap->search( base => $baseDN, filter => $manualFilter, control => [$page] );
    #$mesg = $ldap->search( base    => $baseDN, filter  => $userMemberFilter, control => [$page] );
+   my($resp)  = $mesg->control( LDAP_CONTROL_PAGED ) or last;
+   $cookie    = $resp->cookie or last;
+   $page->cookie($cookie);
 
    $mesg->code && die "Error on search: $@ : " . $mesg->error;
    @entries = $mesg->entries;
@@ -761,9 +791,64 @@ if ( $listLapsPwds)
   foreach $entr ( @entries ) {
       print "DN: ", $entr->dn, "\n";
    }
+  }
  }
 
+if ( $listDNSRecords)
+{
+   print "[I] Listing DNS Records\n";
 
+   $dnsFilter = "(instanceType=4)";
+   $zoneFilter = "(cn=Zone)";
+   $forestDN = "DC=forestDNSZones," . $baseDN;
+
+   # DNS Zone: cn=Zone
+  while(1) {
+  $mesg = $ldap->search( base    => $forestDN, filter  => $zoneFilter, control => [$page] );
+  $mesg->code && die "Error on search: $@ : " . $mesg->error;
+  @entries = $mesg->entries;
+
+
+  foreach $entry (@entries) {
+  $dc= $entry->get_value("dc");
+  print "DNS-Zone: $dc\n";
+  }
+   my($resp)  = $mesg->control( LDAP_CONTROL_PAGED ) or last;
+  $cookie    = $resp->cookie or last;
+  $page->cookie($cookie);
+  }
+
+ while(1){
+  $mesg = $ldap->search( base    => $forestDN, filter  => $dnsFilter, control => [$page] );
+  $mesg->code && die "Error on search: $@ : " . $mesg->error;
+  @entries = $mesg->entries;
+
+  foreach $entry (@entries) {
+  $dc= $entry->get_value("dc");
+  $theDNSRec = $entry->get_value("dnsRecord");
+  $distinguishedName = $entry->get_value("distinguishedName");
+  $cn= $entry->get_value("cn");
+
+  my @spl = split(',', $distinguishedName); 
+  $dnsDomain = $spl[1];
+  @splTwo = split('=', $dnsDomain);
+  $recDomain = $splTwo[1];
+
+  $whenCreated = $entry->get_value("whenCreated");
+  $whenChanged = $entry->get_value("whenChanged");
+
+  $whenCreated = printGenTime($whenCreated);
+  $whenChanged = printGenTime($whenChanged);
+
+
+  print "DNS-Record: $dc.$recDomain, $whenCreated, $whenChanged\n";
+
+  }
+   my($resp)  = $mesg->control( LDAP_CONTROL_PAGED ) or last;
+  $cookie    = $resp->cookie or last;
+  $page->cookie($cookie);
+ }
+}
 
 # $testAttributes = "Yup";
 # using this loop for testing of new queries
