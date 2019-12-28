@@ -6,6 +6,7 @@
 
 # Necessary libraries:
 apt-get install libnet-ldap-perl
+apt-get install libnet-ldap-sid-perl
 
 # Example Usage:
 ```
