@@ -32,8 +32,10 @@ apt-get install libnet-ldap-perl
 -M <user> (list all groups <user> is a member of)
 -A <user> (list all attributes for <user> *NOTE* that this strips binary data)
 -W (list all LAPS passwords, you may want to run this with various user accounts)
--X <baseDN Prefix> (Use New Prefix to BaseDN, use with -Z option)
+-X (Enumerate DNS Zones and DNS Records)
+-Y <baseDN Prefix> (Use New Prefix to BaseDN, use with -Z option)
 -Z <Filter> (Query LDAP with <Filter>)
+
 
 
 
