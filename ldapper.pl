@@ -354,55 +354,7 @@ if ( $listAllServers)
  }
 
 
-# This loop will list all Members of the group
-# specified by the -g command line argument
- if ( $findGroup )
- {
-   printf("[+] Looking for all users in group $groupname\n");
-   #$userFilter = "(&(objectClass=user)(objectcategory=person))";
 
-   $groupFilter = "(sAMAccountName=$groupname)";
-   #printf("[D] Filter: $groupFilter\n");
-
-
-   $mesg = $ldap->search( base    => $baseDN, filter  => $groupFilter, control => [$page] );
-   $mesg->code && die "Error on search: $@ : " . $mesg->error;
-   @entries = $mesg->entries;
-
-   foreach $entry (@entries) 
-   {
-   	$gname = $entry->get_value("cn");
-   	if ($groupname && $gname eq $groupname)
-   	{
-    	print "[I] Found group $gname on server\n";
-    	$description = $entry->get_value("description");
-    	print "[I] Group Description: $description\n";
-    	@members = $entry->get_value( "member");
-    	foreach $member (@members)
-    	{
-     		#print "Running with filter $member\n";
-     		$userfilter = "(objectClass=user)";
-     		$newmesg = $ldap->search( base => $member, filter=> $userfilter);
-     		@nentries = $newmesg->entries;
-     		foreach $nentry (@nentries) {
-       			$sam = $nentry->get_value("sAMAccountName");
-       			print "$groupname: User: $sam\n";
-     		}
-    	}
-    	foreach $member (@members)
-    	{
-     		#print "Running with filter $member\n";
-     		$userfilter = "(objectClass=group)";
-     		$newmesg = $ldap->search( base => $member, filter=> $userfilter);
-     		@nentries = $newmesg->entries;
-     		foreach $nentry (@nentries) {
-       			$sam = $nentry->get_value("sAMAccountName");
-       			print "$groupname: Group: $sam\n";
-     		}
-    	}
-    }
-   }
- }
 
 
 
@@ -881,3 +833,67 @@ if ( $listDNSRecords)
 
 
 
+
+
+
+# This loop will list all Members of the group
+# specified by the -g command line argument
+ if ( $findGroup )
+ {
+   getGroupMembers ($groupname);
+ 
+ }
+
+
+sub getGroupMembers 
+{ 
+    # passing argument     
+    my $groupname= $_[0];    
+    #print "[SUB] $group\n";
+
+   printf("[+] Looking for all users in group $groupname\n");
+   #$userFilter = "(&(objectClass=user)(objectcategory=person))";
+
+   my $groupFilter = "(sAMAccountName=$groupname)";
+   #printf("[D] Filter: $groupFilter\n");
+
+   my $mesg = $ldap->search( base    => $baseDN, filter  => $groupFilter, control => [$page] );
+   $mesg->code && die "Error on search: $@ : " . $mesg->error;
+   my @entries = $mesg->entries;
+
+   foreach $entry (@entries) 
+   {
+    my $gname = $entry->get_value("cn");
+    if ($groupname eq $groupname)
+    {
+      my $description = $entry->get_value("description");
+      print "[I] Group Description: $description\n";
+      my @members = $entry->get_value( "member");
+      foreach $member (@members)
+      {
+        #print "Running with filter $member\n";
+        my $userfilter = "(objectClass=user)";
+        my $newmesg = $ldap->search( base => $member, filter=> $userfilter);
+        my @nentries = $newmesg->entries;
+        foreach $nentry (@nentries) {
+            my $sam = $nentry->get_value("sAMAccountName");
+            print "$groupname: User: $sam\n";
+        }
+      }
+      my @subgroups = $entry->get_value( "member");
+      foreach $subgroup (@subgroups)
+      {
+        #print "Running with filter $subgroup\n";
+        my $grpfilter = "(objectClass=group)";
+        my $newmesg = $ldap->search( base => $subgroup, filter=> $grpfilter);
+        @nentries = $newmesg->entries;
+        foreach $nentry (@nentries) {
+            $sam = $nentry->get_value("sAMAccountName");
+            print "$groupname: Group: $sam\n";
+            getGroupMembers($sam);
+        }
+      }
+    }
+   }
+    return 0; 
+} 
